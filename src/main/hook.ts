@@ -2,8 +2,7 @@ import { ipcMain } from 'electron';
 import { resolve } from 'path';
 import yml from 'js-yaml';
 // import * as Struct from 'structron';
-import GameReader from './GameReader';
-import iohook from 'iohook';
+import type IGameReader from './GameReader';
 import Store from 'electron-store';
 import { ISettings } from '../common/ISettings';
 import axios, { AxiosError } from 'axios';
@@ -15,6 +14,11 @@ import { IOffsets } from './IOffsets';
 import { IpcHandlerMessages, IpcRendererMessages, IpcSyncMessages } from '../common/ipc-messages';
 import { IS_SIDECAR_MODE } from '../common/constants';
 const { IOffsets } = createCheckers(TI);
+
+let GameReader: typeof IGameReader;
+if (!IS_SIDECAR_MODE) {
+	GameReader = require('./GameReader').default;
+}
 
 interface IOHookEvent {
   type: string
@@ -29,7 +33,9 @@ interface IOHookEvent {
 
 const store = new Store<ISettings>();
 
-async function loadOffsets(): Promise<{ success: true; offsets: IOffsets } | { success: false; error: string }> {
+type OffsetResult = { success: true; offsets: IOffsets } | { success: false; error: string };
+
+async function loadOffsets(): Promise<OffsetResult> {
 	const valuesFile = resolve((process.env.LOCALAPPDATA || '') + 'Low', 'Innersloth/Among Us/Unity/6b8b0d91-4a20-4a00-a3e4-4da4a883a5f0/Analytics/values');
 
 	let version = '';
@@ -94,7 +100,7 @@ async function loadOffsets(): Promise<{ success: true; offsets: IOffsets } | { s
 }
 
 let readingGame = false;
-let gameReader: GameReader;
+let gameReader: IGameReader;
 
 ipcMain.on(IpcSyncMessages.GET_INITIAL_STATE, (event) => {
 	if (IS_SIDECAR_MODE) {
@@ -113,7 +119,12 @@ ipcMain.on(IpcSyncMessages.GET_INITIAL_STATE, (event) => {
  * null indicates success, failures should return an error string
  */
 ipcMain.handle(IpcHandlerMessages.START_HOOK, async (event): Promise<{ error: string } | null> => {
-	const offsetsResults = await loadOffsets();
+	if (IS_SIDECAR_MODE) return null;
+
+	let offsetsResults: OffsetResult = { success: true, offsets: null as any };
+	if (!IS_SIDECAR_MODE) {
+		offsetsResults = await loadOffsets();
+	}
 	if (!offsetsResults.success) {
 		return { error: offsetsResults.error };
 	}
@@ -121,23 +132,26 @@ ipcMain.handle(IpcHandlerMessages.START_HOOK, async (event): Promise<{ error: st
 		readingGame = true;
 
 		// Register key events
-		iohook.on('keydown', (ev: IOHookEvent) => {
-			const shortcutKey = store.get('pushToTalkShortcut');
-			if (keyCodeMatches(shortcutKey as K, ev)) {
-				event.sender.send(IpcRendererMessages.PUSH_TO_TALK, true);
-			}
-		});
-		iohook.on('keyup', (ev: IOHookEvent) => {
-			const shortcutKey = store.get('pushToTalkShortcut');
-			if (keyCodeMatches(shortcutKey as K, ev)) {
-				event.sender.send(IpcRendererMessages.PUSH_TO_TALK, false);
-			}
-			if (keyCodeMatches(store.get('deafenShortcut') as K, ev)) {
-				event.sender.send(IpcRendererMessages.TOGGLE_DEAFEN);
-			}
-		});
+		if (process.platform === 'win32') {
+			const iohook = require('iohook');
+			iohook.on('keydown', (ev: IOHookEvent) => {
+				const shortcutKey = store.get('pushToTalkShortcut');
+				if (keyCodeMatches(shortcutKey as K, ev)) {
+					event.sender.send(IpcRendererMessages.PUSH_TO_TALK, true);
+				}
+			});
+			iohook.on('keyup', (ev: IOHookEvent) => {
+				const shortcutKey = store.get('pushToTalkShortcut');
+				if (keyCodeMatches(shortcutKey as K, ev)) {
+					event.sender.send(IpcRendererMessages.PUSH_TO_TALK, false);
+				}
+				if (keyCodeMatches(store.get('deafenShortcut') as K, ev)) {
+					event.sender.send(IpcRendererMessages.TOGGLE_DEAFEN);
+				}
+			});
 
-		iohook.start();
+			iohook.start();
+		}
 
 		// Only run the memory reader when the app was not built for sidecar mode
 		if (!IS_SIDECAR_MODE) {

@@ -22,7 +22,9 @@
     "dev": "electron-webpack dev",
     "dev:sidecar": "cross-env ELECTRON_WEBPACK_APP_CREWLINK_SIDECAR=1 electron-webpack dev",
     "compile": "electron-webpack",
-    "dist": "yarn compile && electron-builder --win --x64 --publish never",
+    "dist": "yarn dist:win",
+    "dist:osx": "yarn compile && electron-builder --mac --x64 --publish never",
+    "dist:win": "yarn compile && electron-builder --win --x64 --publish never",
     "publish": "yarn compile && electron-builder --win --x64 --publish always"
   },
   "dependencies": {
@@ -35,7 +37,6 @@
     "electron-window-state": "^5.0.3",
     "iohook": "git://github.com/ykhwong/iohook",
     "jsondiffpatch": "^0.4.1",
-    "memoryjs": "git://github.com/Rob--/memoryjs",
     "react": "^17.0.1",
     "react-dom": "^17.0.1",
     "react-spinners-kit": "^1.9.1",
@@ -70,6 +71,9 @@
     "ts-interface-builder": "^0.2.2",
     "typescript": "^4.0.3",
     "webpack": "~4.42.1"
+  },
+  "optionalDependencies": {
+    "memoryjs": "git://github.com/Rob--/memoryjs"
   },
   "iohook": {
     "targets": ["electron-80"]
