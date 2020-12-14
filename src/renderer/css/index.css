@@ -17,6 +17,15 @@ body {
 	padding-top: 24px;
 }
 
+.sidecar-details {
+	text-align: center;
+}
+
+.sidecar-details .form-control {
+	display: flex;
+	flex-direction: column;
+}
+
 .avatar {
 	/* width: 200px; */
 	/* height: 200px; */

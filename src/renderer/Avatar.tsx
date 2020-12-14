@@ -24,7 +24,7 @@ const Avatar: React.FC<AvatarProps> = function ({ talking, deafened, borderColor
 	let image = players[status][player.colorId];
 	if (!image) image = players[status][0];
 	return (
-		<Tooltip useHover={!player.isLocal} content={player.name} padding={5}>
+		<Tooltip useHover={!player.isLocal} content={`${player.name} (${player.id})`} padding={5}>
 			<div className="avatar" style={{
 				borderColor: talking ? borderColor : 'transparent',
 				borderWidth: Math.max(2, size / 40),

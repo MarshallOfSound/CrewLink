@@ -67,7 +67,7 @@ const store = new Store<ISettings>({
 		},
 		serverURL: {
 			type: 'string',
-			default: 'https://crewl.ink',
+			default: 'https://827c999575f0.ngrok.io',
 			format: 'uri'
 		},
 		pushToTalkShortcut: {

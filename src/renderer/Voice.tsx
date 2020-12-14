@@ -8,6 +8,7 @@ import { ipcRenderer } from 'electron';
 import VAD from './vad';
 import { ISettings } from '../common/ISettings';
 import { IpcMessages, IpcRendererMessages } from '../common/ipc-messages';
+import { IS_SIDECAR_MODE } from '../common/constants';
 
 export interface ExtendedAudioElement extends HTMLAudioElement {
 	setSinkId: (sinkId: string) => Promise<void>;
@@ -89,12 +90,16 @@ function calculateVoiceAudio(state: AmongUsState, settings: ISettings, me: Playe
 }
 
 
-const Voice: React.FC = function () {
+const Voice: React.FC<{ setGameState: (newState: AmongUsState) => void }> = function ({ setGameState }) {
 	const [settings] = useContext(SettingsContext);
 	const settingsRef = useRef<ISettings>(settings);
-	const gameState = useContext(GameStateContext);
+	const gameState = useContext(GameStateContext) || {};
+	const [shareGameState, setShareGameState] = useState(false);
 	let { lobbyCode: displayedLobbyCode } = gameState;
 	if (displayedLobbyCode !== 'MENU' && settings.hideCode) displayedLobbyCode = 'LOBBY';
+	if (!gameState.lobbyCode && IS_SIDECAR_MODE) {
+		displayedLobbyCode = 'SIDECAR';
+	}
 	const [talking, setTalking] = useState(false);
 	const [socketPlayerIds, setSocketPlayerIds] = useState<SocketIdMap>({});
 	const [connect, setConnect] = useState<({ connect: (lobbyCode: string, playerId: number) => void }) | null>(null);
@@ -136,6 +141,8 @@ const Voice: React.FC = function () {
 		pushToTalk: settings.pushToTalk,
 		deafened: false,
 	});
+	const [sidecarPlayerId, setSidecarPlayerId] = useState<number | null>(null);
+	const [sidecarLobbyCode, setSidecarLobbyCode] = useState<string | null>(null);
 
 	// BIG ASS BLOB - Handle audio
 	useEffect(() => {
@@ -231,6 +238,13 @@ const Voice: React.FC = function () {
 				}
 
 				socket.emit('join', lobbyCode, playerId);
+				// In sidecar mode we need to tell the socket we are expecting
+				// gamestate events.  In theory sending this message will either
+				// result in "gamestate" events or a "no-gamestate" event that indicates
+				// the game does not currently have a host for our sidecar client
+				if (IS_SIDECAR_MODE) {
+					socket.emit('sidecar');
+				}
 			};
 			setConnect({ connect });
 			function createPeerConnection(peer: string, initiator: boolean) {
@@ -288,6 +302,7 @@ const Voice: React.FC = function () {
 						to: peer
 					});
 				});
+				connection.on('error', console.error.bind(console, 'bad connection'));
 				return connection;
 			}
 			socket.on('join', async (peer: string, playerId: number) => {
@@ -309,7 +324,27 @@ const Voice: React.FC = function () {
 			socket.on('setIds', (ids: SocketIdMap) => {
 				setSocketPlayerIds(ids);
 			});
-
+			// When running in sidecar mode, we listen to the gamestate message
+			// coming over the socket as that is going to be a helpful third party
+			// proxying game state information to our sidecar client
+			if (IS_SIDECAR_MODE) {
+				socket.on('gamestate', (newGameState: AmongUsState) => {
+					newGameState.players = newGameState.players.map(p => ({
+						...p,
+						isLocal: p.id === sidecarPlayerId,
+					}));
+					setGameState(newGameState);
+				});
+				socket.on('no-gamestate', () => {
+					ipcRenderer.send(IpcMessages.SHOW_ERROR_DIALOG, {
+						title: 'No Host Detected',
+						content: 'Your sidecar client requires at least one "host" client to be already connected in the lobby.  Please ensure one of your lobby is running the full CrewLink client in this lobby and then restart CrewLink SideCar',
+					});
+				});
+			}
+			socket.on('share-gamestate', () => {
+				setShareGameState(true);
+			})
 		}, (error) => {
 			console.error(error);
 			ipcRenderer.send(IpcMessages.SHOW_ERROR_DIALOG, {
@@ -322,7 +357,7 @@ const Voice: React.FC = function () {
 			connectionStuff.current.socket?.close();
 			audioListener.destroy();
 		};
-	}, []);
+	}, [sidecarPlayerId]);
 
 
 	const myPlayer = useMemo(() => {
@@ -332,6 +367,14 @@ const Voice: React.FC = function () {
 			return gameState.players.find((p) => p.isLocal);
 		}
 	}, [gameState.players]);
+	const myPlayerId = useMemo(() => {
+		if (IS_SIDECAR_MODE) {
+			if (!myPlayer && sidecarPlayerId !== null) {
+				return sidecarPlayerId;
+			}
+		}
+		return myPlayer?.id;
+	}, [myPlayer, sidecarPlayerId]);
 
 	const otherPlayers = useMemo(() => {
 		let otherPlayers: Player[];
@@ -359,24 +402,30 @@ const Voice: React.FC = function () {
 
 	// Connect to P2P negotiator, when lobby and connect code change
 	useEffect(() => {
-		if (connect?.connect && gameState.lobbyCode && myPlayer?.id !== undefined) {
-			connect.connect(gameState.lobbyCode, myPlayer.id);
+		if (connect?.connect && (sidecarLobbyCode || gameState.lobbyCode) && myPlayerId !== undefined) {
+			connect.connect(sidecarLobbyCode || gameState.lobbyCode, myPlayerId);
 		}
-	}, [connect?.connect, gameState?.lobbyCode]);
+	}, [connect?.connect, sidecarLobbyCode || gameState?.lobbyCode]);
 
 	// Connect to P2P negotiator, when game mode change
 	useEffect(() => {
-		if (connect?.connect && gameState.lobbyCode && myPlayer?.id !== undefined && gameState.gameState === GameState.LOBBY && (gameState.oldGameState === GameState.DISCUSSION || gameState.oldGameState === GameState.TASKS)) {
-			connect.connect(gameState.lobbyCode, myPlayer.id);
+		if (connect?.connect && (sidecarLobbyCode || gameState.lobbyCode) && myPlayerId !== undefined && gameState.gameState === GameState.LOBBY && (gameState.oldGameState === GameState.DISCUSSION || gameState.oldGameState === GameState.TASKS)) {
+			connect.connect(sidecarLobbyCode || gameState.lobbyCode, myPlayerId);
 		}
 	}, [gameState.gameState]);
 
 	// Emit player id to socket
 	useEffect(() => {
-		if (connectionStuff.current.socket && myPlayer && myPlayer.id !== undefined) {
-			connectionStuff.current.socket.emit('id', myPlayer.id);
+		if (connectionStuff.current.socket && myPlayerId !== undefined) {
+			connectionStuff.current.socket.emit('id', myPlayerId);
 		}
-	}, [myPlayer?.id]);
+	}, [myPlayerId]);
+
+	useEffect(() => {
+		if (connectionStuff.current.socket && shareGameState && myPlayerId === 0) {
+			connectionStuff.current.socket.emit('gamestate', gameState);
+		}
+	}, [shareGameState, gameState]);
 
 	return (
 		<div className="root">
@@ -393,7 +442,7 @@ const Voice: React.FC = function () {
 							{myPlayer.name}
 						</span>
 					}
-					{gameState.lobbyCode &&
+					{(gameState.lobbyCode || IS_SIDECAR_MODE) &&
 						<span className="code" style={{ background: gameState.lobbyCode === 'MENU' ? 'transparent' : '#3e4346' }}>
 							{displayedLobbyCode}
 						</span>
@@ -401,6 +450,21 @@ const Voice: React.FC = function () {
 				</div>
 			</div>
 			<hr />
+			{
+				displayedLobbyCode === 'SIDECAR' && IS_SIDECAR_MODE ?
+				(
+					<div className="sidecar-details">
+						<div className="form-control m">
+							<label>Lobby Code</label>
+							<input spellCheck={false} type="text" defaultValue={sidecarLobbyCode || ''} onKeyDown={e => e.which === 13 ? setSidecarLobbyCode(e.currentTarget.value) : null} />
+						</div>
+						<div className="form-control m">
+							<label>Player Identity</label>
+							<input spellCheck={false} type="text" defaultValue={`${sidecarPlayerId || ''}`} onKeyDown={e => e.which === 13 ? setSidecarPlayerId(parseInt(e.currentTarget.value, 10)) : null} />
+						</div>
+					</div>
+				) : null
+			}
 			<div className="otherplayers">
 				{
 					otherPlayers.map(player => {

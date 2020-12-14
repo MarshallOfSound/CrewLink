@@ -7,6 +7,7 @@ import { AmongUsState } from '../common/AmongUsState';
 import Settings, { settingsReducer } from './Settings';
 import { GameStateContext, SettingsContext } from './contexts';
 import { IpcHandlerMessages, IpcMessages, IpcRendererMessages, IpcSyncMessages } from '../common/ipc-messages';
+import { IS_SIDECAR_MODE } from '../common/constants';
 
 let appVersion = '';
 if (typeof window !== 'undefined' && window.location) {
@@ -18,7 +19,7 @@ if (typeof window !== 'undefined' && window.location) {
 enum AppState { MENU, VOICE }
 
 function App() {
-	const [state, setState] = useState<AppState>(AppState.MENU);
+	const [state, setState] = useState<AppState>(IS_SIDECAR_MODE ? AppState.VOICE : AppState.MENU);
 	const [gameState, setGameState] = useState<AmongUsState>({} as AmongUsState);
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [errored, setErrored] = useState(false);
@@ -27,7 +28,7 @@ function App() {
 		microphone: 'Default',
 		speaker: 'Default',
 		pushToTalk: false,
-		serverURL: 'https://crewl.ink',
+		serverURL: 'https://827c999575f0.ngrok.io',
 		pushToTalkShortcut: 'V',
 		deafenShortcut: 'RControl',
 		offsets: {
@@ -79,7 +80,7 @@ function App() {
 		page = <Menu errored={errored} />;
 		break;
 	case AppState.VOICE:
-		page = <Voice />;
+		page = <Voice setGameState={setGameState} />;
 		break;
 	}
 	return (

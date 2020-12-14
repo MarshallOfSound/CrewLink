@@ -1,0 +1,1 @@
+export const IS_SIDECAR_MODE = !!process.env.ELECTRON_WEBPACK_APP_CREWLINK_SIDECAR;

@@ -13,6 +13,7 @@ import TI from './hook-ti';
 import { existsSync, readFileSync } from 'fs';
 import { IOffsets } from './IOffsets';
 import { IpcHandlerMessages, IpcRendererMessages, IpcSyncMessages } from '../common/ipc-messages';
+import { IS_SIDECAR_MODE } from '../common/constants';
 const { IOffsets } = createCheckers(TI);
 
 interface IOHookEvent {
@@ -96,6 +97,11 @@ let readingGame = false;
 let gameReader: GameReader;
 
 ipcMain.on(IpcSyncMessages.GET_INITIAL_STATE, (event) => {
+	if (IS_SIDECAR_MODE) {
+		console.error('Recieved a GET_INITIAL_STATE message when running in sidecar mode');
+		event.returnValue = null;
+		return;
+	}
 	if (!readingGame) {
 		console.error('Recieved GET_INITIAL_STATE message before the START_HOOK message was received');
 		event.returnValue = null;
@@ -133,14 +139,16 @@ ipcMain.handle(IpcHandlerMessages.START_HOOK, async (event): Promise<{ error: st
 
 		iohook.start();
 
-		// Read game memory
-		gameReader = new GameReader(event.sender.send.bind(event.sender), offsetsResults.offsets);
+		// Only run the memory reader when the app was not built for sidecar mode
+		if (!IS_SIDECAR_MODE) {
+			gameReader = new GameReader(event.sender.send.bind(event.sender), offsetsResults.offsets);
 
-		const frame = () => {
-			gameReader.loop();
-			setTimeout(frame, 1000 / 20);
-		};
-		frame();
+			const frame = () => {
+				gameReader.loop();
+				setTimeout(frame, 1000 / 20);
+			};
+			frame();
+		}
 	} else if (gameReader) {
 		gameReader.amongUs = null;
 	}
